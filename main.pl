@@ -5,8 +5,10 @@
 :-dynamic certeza/2.
 :-dynamic energia/1.
 :-dynamic pontuacao/1.
+:-dynamic collected/2.
+:-dynamic local_sensacao/3.
 
-:-consult('mapa.pl').
+:-consult('mapa-dificil.pl').
 
 delete([], _, []).
 delete([Elem|Tail], Del, Result) :-
@@ -24,6 +26,8 @@ reset_game :- retractall(memory(_,_,_)),
 			retractall(energia(_)),
 			retractall(pontuacao(_)),
 			retractall(posicao(_,_,_)),
+			retractall(collected(_,_)),
+			retractall(local_sensacao(_,_,_)),
 			assert(energia(100)),
 			assert(pontuacao(0)),
 			assert(posicao(1,1, norte)).
@@ -46,10 +50,144 @@ atualiza_energia(N):- energia(E), retract(energia(E)), NE is E + N,
 					  (NE >0,assert(energia(NE)),!)
 					 ).
 
-%verifica situacao da nova posicao e atualiza energia e pontos
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%% LÓGICA DE INFERÊNCIA AVANÇADA (DETETIVE)
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+% Auxiliar: Lugar conhecido é onde já fui OU onde estou agora
+conhecido(X, Y) :- visitado(X, Y).
+conhecido(X, Y) :- posicao(X, Y, _).
+
+% Vizinho Estático
+vizinho_de(X, Y, NX, NY) :- NX is X, NY is Y + 1, map_size(_,H), NY =< H.
+vizinho_de(X, Y, NX, NY) :- NX is X, NY is Y - 1, NY > 0.
+vizinho_de(X, Y, NX, NY) :- NX is X + 1, NY is Y, map_size(W,_), NX =< W.
+vizinho_de(X, Y, NX, NY) :- NX is X - 1, NY is Y, NX > 0.
+
+% Regra Genérica: Tenta triangular perigos
+triangulacao :-
+    (tenta_triangular(passos); true),
+    (tenta_triangular(palmas); true),
+    (tenta_triangular(brisa); true), !.
+
+tenta_triangular(Sensor) :-
+    % 1. Pega duas posições ONDE SENTI O PERIGO
+    %visitado(X1, Y1), local_sensacao(X1, Y1, Sens1), member(Sensor, Sens1),
+    %visitado(X2, Y2), local_sensacao(X2, Y2, Sens2), member(Sensor, Sens2),
+    conhecido(X1, Y1), local_sensacao(X1, Y1, Sens1), member(Sensor, Sens1),
+    conhecido(X2, Y2), local_sensacao(X2, Y2, Sens2), member(Sensor, Sens2),
+	(X1 \= X2 ; Y1 \= Y2),
+    
+    %Acha a interseção (vizinhos comuns aos dois) que ainda não visitei
+    findall((NX, NY), (
+        vizinho_de(X1, Y1, NX, NY),
+        vizinho_de(X2, Y2, NX, NY),
+        %\+ visitado(NX, NY)
+		\+ conhecido(NX, NY)
+
+    ), Comuns),
+    
+    %Se sobrou EXATAMENTE UM candidato
+    sort(Comuns, Unicos),
+    length(Unicos, 1),
+    Unicos = [(TargetX, TargetY)],
+    
+    %Verifica
+    \+ certeza(TargetX, TargetY),
+    
+    %Confirma o perigo na memoria geral
+    retractall(memory(TargetX, TargetY, _)),
+    assert(memory(TargetX, TargetY, [Sensor])),
+    assert(certeza(TargetX, TargetY)),
+    write('DETETIVE: CONFIRMADO '), write(Sensor), write(' EM '), write(TargetX), write(','), writeln(TargetY).
+
+% --- CONTADORES INTELIGENTES ---
+total_inimigos(4).
+total_pocos(8).
+total_teleportes(4).
+
+% --- AUXILIARES ---
+ouros_restantes(N) :- 
+    findall(1, tile(_,_, 'O'), Lista), 
+    length(Lista, N).
+
+inimigos_encontrados(N) :-
+    findall((X,Y), (
+        (visitado(X,Y), (tile(X,Y,'D'); tile(X,Y,'d')));
+        (\+ visitado(X,Y), certeza(X,Y), memory(X,Y,M), member(passos, M))
+    ), Lista),
+    sort(Lista, Unicos), length(Unicos, N).
+
+pocos_encontrados(N) :-
+    findall((X,Y), (
+        (conhecido(X,Y), tile(X,Y,'P'));
+        (\+ conhecido(X,Y), certeza(X,Y), memory(X,Y,M), member(brisa, M))
+    ), Lista),
+    sort(Lista, Unicos), length(Unicos, N).
+
+teleportes_encontrados(N) :-
+    findall((X,Y), (
+        (conhecido(X,Y), tile(X,Y,'T'));
+        (\+ conhecido(X,Y), certeza(X,Y), memory(X,Y,M), member(palmas, M))
+    ), Lista),
+    sort(Lista, Unicos), length(Unicos, N).
+
+apagar_suspeitas(Sensor) :-
+    memory(X, Y, Mem), member(Sensor, Mem), 
+	\+ certeza(X, Y),\+ conhecido(X,Y), %\+ visitado(X,Y),
+    delete(Mem, Sensor, NovaMem),
+    retract(memory(X, Y, Mem)), assert(memory(X, Y, NovaMem)),
+    write('LIMPEZA: Removido suspeita de '), write(Sensor), write(' em '), write(X), write(','), writeln(Y),
+    fail.
+apagar_suspeitas(_) :- true.
+
+%Limpeza Global: Se achou todos de um tipo, apaga as suspeitas restantes
+limpeza_global :-
+    total_inimigos(TI), inimigos_encontrados(IE), IE >= TI, apagar_suspeitas(passos);
+    total_pocos(TP), pocos_encontrados(PE), PE >= TP, apagar_suspeitas(brisa);
+    total_teleportes(TT), teleportes_encontrados(TE), TE >= TT, apagar_suspeitas(palmas);
+    true.
+
+reportar_status :-
+    total_inimigos(TI), inimigos_encontrados(IE), RestoI is TI - IE,
+    total_pocos(TP), pocos_encontrados(PE), RestoP is TP - PE,
+
+    nl, write('--- STATUS DO CONHECIMENTO ---'), nl,
+    write('Inimigos Restantes: '), write(RestoI), write('/'), write(TI), nl,
+	write('Pocos Restantes: '), write(RestoP), write('/'), write(TP), nl.
+
+
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%% Verifica Eventos na Posição
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+%Ouro: Marca como coletado, ganha pontos, mas NAO deleta tile ainda (visual)
+%    Ganha pontos, marca como coletado, mas NÃO deleta o tile ainda.
+verifica_player :- 
+    posicao(X,Y,_), tile(X,Y,'O'), 
+    \+ collected(X,Y),          % Verifica se já não pegamos esse ouro
+    assert(collected(X,Y)),     % Marca como pego
+    atualiza_pontuacao(1000),   % Ganha pontos
+    % set_real(X,Y),            
+    fail.                       
+
+%PowerUp: Marca como coletado se energia < 100
+verifica_player :- 
+    posicao(X,Y,_), tile(X,Y,'U'), 
+    \+ collected(X,Y),      
+    energia(E), E < 100,    % Só pega se precisar!
+    assert(collected(X,Y)), % Marca como pego
+    atualiza_energia(20),   % Cura
+    fail.                   
+
+%Buracos
 verifica_player :- posicao(X,Y,_), tile(X,Y,'P'), atualiza_energia(-100), atualiza_pontuacao(-1000),!.
-verifica_player :- posicao(X,Y,_), tile(X,Y,'D'), random_between(-80,-50,D), atualiza_energia(D),!.
-verifica_player :- posicao(X,Y,_), tile(X,Y,'d'), random_between(-50,-25,D), atualiza_energia(D),!.
+%Inimigos
+verifica_player :- posicao(X,Y,_), tile(X,Y,'D'), atualiza_energia(-50),!.
+verifica_player :- posicao(X,Y,_), tile(X,Y,'d'), atualiza_energia(-20),!.
+%Teleporte
 verifica_player :- posicao(X,Y,Z), tile(X,Y,'T'), 
 					map_size(SX,SY), random_between(1,SX,NX), random_between(1,SY,NY),
 				retract(posicao(X,Y,Z)), assert(posicao(NX,NY,Z)), atualiza_obs, verifica_player,!.
@@ -71,28 +209,34 @@ virar_esquerda :- posicao(X,Y, oeste), retract(posicao(_,_,_)), assert(posicao(X
 virar_esquerda :- posicao(X,Y, sul), retract(posicao(_,_,_)), assert(posicao(X, Y, leste)),atualiza_pontuacao(-1),!.
 virar_esquerda :- posicao(X,Y, leste), retract(posicao(_,_,_)), assert(posicao(X, Y, norte)),atualiza_pontuacao(-1),!.
 
+%Limpa o item do mapa somente quando o agente SAI da casa
+limpar_rastro(X,Y) :- 
+    collected(X,Y), tile(X,Y,Z), (Z='O'; Z='U'),
+    retract(tile(X,Y,Z)), assert(tile(X,Y,'')), set_real(X,Y), !.
+limpar_rastro(_,_).
+
 %andar
-andar :- posicao(X,Y,P), P = norte, map_size(_,MAX_Y), Y < MAX_Y, YY is Y + 1, 
+andar :- posicao(X,Y,P), P = norte, map_size(_,MAX_Y), Y < MAX_Y, YY is Y + 1,
+		 limpar_rastro(X,Y), % Limpa o ouro ao sair
          retract(posicao(X,Y,_)), assert(posicao(X, YY, P)), 
-		 %((retract(certeza(X,YY)), assert(certeza(X,YY))); assert(certeza(X,YY))),
 		 set_real(X,YY),
 		 ((retract(visitado(X,Y)), assert(visitado(X,Y))); assert(visitado(X,Y))),atualiza_pontuacao(-1),!.
 		 
 andar :- posicao(X,Y,P), P = sul,  Y > 1, YY is Y - 1, 
+		 limpar_rastro(X,Y), % Limpa o ouro ao sair
          retract(posicao(X,Y,_)), assert(posicao(X, YY, P)), 
-		 %((retract(certeza(X,YY)), assert(certeza(X,YY))); assert(certeza(X,YY))),
 		 set_real(X,YY),
 		 ((retract(visitado(X,Y)), assert(visitado(X,Y))); assert(visitado(X,Y))),atualiza_pontuacao(-1),!.
 
 andar :- posicao(X,Y,P), P = leste, map_size(MAX_X,_), X < MAX_X, XX is X + 1, 
+		 limpar_rastro(X,Y), % Limpa o ouro ao sair
          retract(posicao(X,Y,_)), assert(posicao(XX, Y, P)), 
-		 %((retract(certeza(XX,Y)), assert(certeza(XX,Y))); assert(certeza(XX,Y))),
 		 set_real(XX,Y),
 		 ((retract(visitado(X,Y)), assert(visitado(X,Y))); assert(visitado(X,Y))),atualiza_pontuacao(-1),!.
 
 andar :- posicao(X,Y,P), P = oeste,  X > 1, XX is X - 1, 
+		 limpar_rastro(X,Y), % Limpa o ouro ao sair
          retract(posicao(X,Y,_)), assert(posicao(XX, Y, P)), 
-		 %((retract(certeza(XX,Y)), assert(certeza(XX,Y))); assert(certeza(XX,Y))),
 		 set_real(XX,Y),
 		 ((retract(visitado(X,Y)), assert(visitado(X,Y))); assert(visitado(X,Y))),atualiza_pontuacao(-1),!.
 		 
@@ -104,7 +248,7 @@ pegar :- atualiza_pontuacao(-5),!.
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %% Funcoes Auxiliares de navegação e observação
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-		 
+
 %Define as 4 adjacencias		 
 adjacente(X, Y) :- posicao(PX, Y, _), map_size(MAX_X,_),PX < MAX_X, X is PX + 1.  
 adjacente(X, Y) :- posicao(PX, Y, _), PX > 1, X is PX - 1.  
@@ -128,8 +272,22 @@ observacao_adj(passos,L) :- member('d',L).
 %% Tratamento de KB e observações
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
+gravar_sensacao_atual :-
+    posicao(X, Y, _),
+    observacoes(ListaSensores), % Pega o que está sentindo AGORA (brisa, passos...)
+    retractall(local_sensacao(X, Y, _)),
+    assert(local_sensacao(X, Y, ListaSensores)).
+
 %consulta e processa observações
-atualiza_obs:-adj_cand_obs(LP), observacoes(LO), iter_pos_list(LP,LO), observacao_certeza, observacao_vazia.
+atualiza_obs:-
+		gravar_sensacao_atual,
+		adj_cand_obs(LP), 
+		observacoes(LO), 
+		iter_pos_list(LP,LO), 
+		observacao_certeza,
+		triangulacao,
+		observacao_vazia, 
+		reportar_status.
 
 %adjacencias candidatas p/ a observacao (aquelas não visitadas)
 adj_cand_obs(L) :- findall((X,Y), (adjacente(X, Y), \+visitado(X,Y)), L).
@@ -192,14 +350,12 @@ show_player(X,Y) :- posicao(X,Y, leste), write('>'),!.
 show_player(X,Y) :- posicao(X,Y, sul), write('v'),!.
 show_player(X,Y) :- posicao(X,Y, morto), write('+'),!.
 
-%show_position(X,Y) :- show_player(X,Y),!.
 show_position(X,Y) :- (show_player(X,Y); write(' ')), tile(X,Y,Z), ((Z='', write(' '));write(Z)),!.
 
 show_map :- map_size(_,MAX_Y), show_map(1,MAX_Y),!.
 show_map(X,Y) :- Y >= 1, map_size(MAX_X,_), X =< MAX_X, show_position(X,Y), write(' | '), XX is X + 1, show_map(XX, Y),!.
 show_map(X,Y) :- Y >= 1, map_size(X,_),YY is Y - 1, write(Y), nl, show_map(1, YY),!.
 show_map(_,0) :- energia(E), pontuacao(P), write('E: '), write(E), write('   P: '), write(P),!.
-
 
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -216,9 +372,7 @@ show_mem_info(X,Y) :- memory(X,Y,Z),
 
 show_mem_info(X,Y) :- \+memory(X,Y,[]), 
 			((visitado(X,Y), write('.'),!); (\+certeza(X,Y), write('?'),!); (certeza(X,Y), write('!'))),
-			write('     '),!.		
-		
-		
+			write('     '),!.			
 
 show_mem_position(X,Y) :- posicao(X,Y,_), 
 		((visitado(X,Y), write('.'),!); (certeza(X,Y), write('!'),!); write(' ')),
@@ -228,29 +382,10 @@ show_mem_position(X,Y) :- posicao(X,Y,_),
 		((member(passos, Z), write('D'));write(' ')),
 		((member(reflexo, Z), write('U'));write(' ')),!);
 		(write('   '),!)).
-
-		
+	
 show_mem_position(X,Y) :- show_mem_info(X,Y),!.
-
 
 show_mem :- map_size(_,MAX_Y), show_mem(1,MAX_Y),!.
 show_mem(X,Y) :- Y >= 1, map_size(MAX_X,_), X =< MAX_X, show_mem_position(X,Y), write('|'), XX is X + 1, show_mem(XX, Y),!.
 show_mem(X,Y) :- Y >= 1, map_size(X,_),YY is Y - 1, write(Y), nl, show_mem(1, YY),!.
 show_mem(_,0) :- energia(E), pontuacao(P), write('E: '), write(E), write('   P: '), write(P),!.
-
-
-
-%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-
-%apagar esta linha - apenas para demonstracao aleatoria
-executa_acao(X) :- L=['virar_esquerda','virar_direita','andar','pegar'],random_between(1,4,I), nth1(I, L, X),!.
-
-%apagar linhas abaixo... sao exemplos de resposta
-%executa_acao(andar) :- posicao(PX, _, oeste), PX > 1, X = andar,!.
-%executa_acao(andar) :- posicao(PX, _, leste), PX < 3, X = andar,!.
-%executa_acao(pegar) :- posicao(PX, PY,_), tem_ouro(PX, PY), !.
-%executa_acao(voltar) :- peguei_todos_ouros,!.
-
-
-
-
