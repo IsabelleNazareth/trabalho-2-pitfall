@@ -1,8 +1,11 @@
 
 :-dynamic posicao/3.
+:-dynamic ultima_pos/2.
 :-dynamic memory/3.
 :-dynamic visitado/2.
 :-dynamic certeza/2.
+:-dynamic sem_saida/2.
+:-dynamic visita_count/3.
 :-dynamic energia/1.
 :-dynamic pontuacao/1.
 :-dynamic collected/2.
@@ -23,14 +26,19 @@ delete([Elem|Tail], Del, Result) :-
 reset_game :- retractall(memory(_,_,_)), 
 			retractall(visitado(_,_)), 
 			retractall(certeza(_,_)),
+			retractall(sem_saida(_,_)),
+			retractall(visita_count(_,_,_)),
 			retractall(energia(_)),
 			retractall(pontuacao(_)),
 			retractall(posicao(_,_,_)),
+			retractall(ultima_pos(_,_)),
 			retractall(collected(_,_)),
 			retractall(local_sensacao(_,_,_)),
 			assert(energia(100)),
 			assert(pontuacao(0)),
-			assert(posicao(1,1, norte)).
+			assert(posicao(1,1, norte)),
+			assert(ultima_pos(1,1)),
+			assert(visitado(1,1)).
 
 
 :-reset_game.
@@ -65,38 +73,48 @@ vizinho_de(X, Y, NX, NY) :- NX is X, NY is Y - 1, NY > 0.
 vizinho_de(X, Y, NX, NY) :- NX is X + 1, NY is Y, map_size(W,_), NX =< W.
 vizinho_de(X, Y, NX, NY) :- NX is X - 1, NY is Y, NX > 0.
 
-% Regra Genérica: Tenta triangular perigos
+% Candidatos ainda desconhecidos ao redor de uma fonte de sensor
+candidatos_sensor(X, Y, Lista) :-
+    findall((NX, NY), (
+        vizinho_de(X, Y, NX, NY),
+        \+ visitado(NX, NY),
+        \+ certeza(NX, NY)
+    ), Lista).
+
+sensacao_explicada(Sensor, SX, SY) :-
+    vizinho_de(SX, SY, NX, NY),
+    certeza(NX, NY),
+    memory(NX, NY, M),
+    member(Sensor, M).
+
+% Regra Genérica: Tenta triangular perigos (busca pares de casas que sentiram o mesmo sensor)
 triangulacao :-
     (tenta_triangular(passos); true),
     (tenta_triangular(palmas); true),
     (tenta_triangular(brisa); true), !.
 
+% Procura pares distintos de casas com o mesmo sensor e cruza seus vizinhos
 tenta_triangular(Sensor) :-
-    % 1. Pega duas posições ONDE SENTI O PERIGO
-    %visitado(X1, Y1), local_sensacao(X1, Y1, Sens1), member(Sensor, Sens1),
-    %visitado(X2, Y2), local_sensacao(X2, Y2, Sens2), member(Sensor, Sens2),
-    conhecido(X1, Y1), local_sensacao(X1, Y1, Sens1), member(Sensor, Sens1),
-    conhecido(X2, Y2), local_sensacao(X2, Y2, Sens2), member(Sensor, Sens2),
-	(X1 \= X2 ; Y1 \= Y2),
-    
-    %Acha a interseção (vizinhos comuns aos dois) que ainda não visitei
-    findall((NX, NY), (
-        vizinho_de(X1, Y1, NX, NY),
-        vizinho_de(X2, Y2, NX, NY),
-        %\+ visitado(NX, NY)
-		\+ conhecido(NX, NY)
+    % posições onde o sensor foi sentido
+    findall((X,Y), (
+        local_sensacao(X, Y, Sens),
+        member(Sensor, Sens),
+        \+ sensacao_explicada(Sensor, X, Y)   % ignora fontes já explicadas por perigo certo
+    ), Fontes0),
+    sort(Fontes0, Fontes),                  % remove duplicados
+    member((X1,Y1), Fontes),
+    member((X2,Y2), Fontes),
+    (X1 \= X2 ; Y1 \= Y2),                  % garante casas diferentes
 
-    ), Comuns),
-    
-    %Se sobrou EXATAMENTE UM candidato
-    sort(Comuns, Unicos),
-    length(Unicos, 1),
-    Unicos = [(TargetX, TargetY)],
-    
-    %Verifica
-    \+ certeza(TargetX, TargetY),
-    
-    %Confirma o perigo na memoria geral
+    % candidatos por sensor (apenas ainda desconhecidos)
+    candidatos_sensor(X1, Y1, C1),
+    candidatos_sensor(X2, Y2, C2),
+
+    % só triangula quando cada fonte tem apenas um candidato E eles coincidem
+    C1 = [(TargetX, TargetY)],
+    C2 = [(TargetX, TargetY)],
+
+    % confirma perigo
     retractall(memory(TargetX, TargetY, _)),
     assert(memory(TargetX, TargetY, [Sensor])),
     assert(certeza(TargetX, TargetY)),
@@ -115,21 +133,21 @@ ouros_restantes(N) :-
 inimigos_encontrados(N) :-
     findall((X,Y), (
         (visitado(X,Y), (tile(X,Y,'D'); tile(X,Y,'d')));
-        (\+ visitado(X,Y), certeza(X,Y), memory(X,Y,M), member(passos, M))
+        (certeza(X,Y), memory(X,Y,M), member(passos, M), \+ visitado(X,Y))
     ), Lista),
     sort(Lista, Unicos), length(Unicos, N).
 
 pocos_encontrados(N) :-
     findall((X,Y), (
         (conhecido(X,Y), tile(X,Y,'P'));
-        (\+ conhecido(X,Y), certeza(X,Y), memory(X,Y,M), member(brisa, M))
+        (certeza(X,Y), memory(X,Y,M), member(brisa, M), \+ conhecido(X,Y))
     ), Lista),
     sort(Lista, Unicos), length(Unicos, N).
 
 teleportes_encontrados(N) :-
     findall((X,Y), (
         (conhecido(X,Y), tile(X,Y,'T'));
-        (\+ conhecido(X,Y), certeza(X,Y), memory(X,Y,M), member(palmas, M))
+        (certeza(X,Y), memory(X,Y,M), member(palmas, M), \+ conhecido(X,Y))
     ), Lista),
     sort(Lista, Unicos), length(Unicos, N).
 
@@ -190,7 +208,10 @@ verifica_player :- posicao(X,Y,_), tile(X,Y,'d'), atualiza_energia(-20),!.
 %Teleporte
 verifica_player :- posicao(X,Y,Z), tile(X,Y,'T'), 
 					map_size(SX,SY), random_between(1,SX,NX), random_between(1,SY,NY),
-				retract(posicao(X,Y,Z)), assert(posicao(NX,NY,Z)), atualiza_obs, verifica_player,!.
+				retract(posicao(X,Y,Z)), assert(posicao(NX,NY,Z)), 
+				((retract(visitado(NX,NY)), assert(visitado(NX,NY))); assert(visitado(NX,NY))),
+				set_real(NX,NY),
+				atualiza_obs, verifica_player,!.
 verifica_player :- true.
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -215,35 +236,234 @@ limpar_rastro(X,Y) :-
     retract(tile(X,Y,Z)), assert(tile(X,Y,'')), set_real(X,Y), !.
 limpar_rastro(_,_).
 
+incrementa_visita(X, Y) :-
+    (   visita_count(X, Y, N) -> N1 is N + 1, retract(visita_count(X, Y, N))
+    ;   N1 = 1),
+    assert(visita_count(X, Y, N1)),
+    (N1 >= 3, X \= 1, Y \= 1 -> assert(sem_saida(X, Y)); true).
+
 %andar
 andar :- posicao(X,Y,P), P = norte, map_size(_,MAX_Y), Y < MAX_Y, YY is Y + 1,
 		 limpar_rastro(X,Y), % Limpa o ouro ao sair
          retract(posicao(X,Y,_)), assert(posicao(X, YY, P)), 
+		 retractall(ultima_pos(_,_)), assert(ultima_pos(X,Y)),
 		 set_real(X,YY),
+		 incrementa_visita(X,YY),
 		 ((retract(visitado(X,Y)), assert(visitado(X,Y))); assert(visitado(X,Y))),atualiza_pontuacao(-1),!.
 		 
 andar :- posicao(X,Y,P), P = sul,  Y > 1, YY is Y - 1, 
 		 limpar_rastro(X,Y), % Limpa o ouro ao sair
          retract(posicao(X,Y,_)), assert(posicao(X, YY, P)), 
+		 retractall(ultima_pos(_,_)), assert(ultima_pos(X,Y)),
 		 set_real(X,YY),
+		 incrementa_visita(X,YY),
 		 ((retract(visitado(X,Y)), assert(visitado(X,Y))); assert(visitado(X,Y))),atualiza_pontuacao(-1),!.
 
 andar :- posicao(X,Y,P), P = leste, map_size(MAX_X,_), X < MAX_X, XX is X + 1, 
 		 limpar_rastro(X,Y), % Limpa o ouro ao sair
          retract(posicao(X,Y,_)), assert(posicao(XX, Y, P)), 
+		 retractall(ultima_pos(_,_)), assert(ultima_pos(X,Y)),
 		 set_real(XX,Y),
+		 incrementa_visita(XX,Y),
 		 ((retract(visitado(X,Y)), assert(visitado(X,Y))); assert(visitado(X,Y))),atualiza_pontuacao(-1),!.
 
 andar :- posicao(X,Y,P), P = oeste,  X > 1, XX is X - 1, 
 		 limpar_rastro(X,Y), % Limpa o ouro ao sair
          retract(posicao(X,Y,_)), assert(posicao(XX, Y, P)), 
+		 retractall(ultima_pos(_,_)), assert(ultima_pos(X,Y)),
 		 set_real(XX,Y),
+		 incrementa_visita(XX,Y),
 		 ((retract(visitado(X,Y)), assert(visitado(X,Y))); assert(visitado(X,Y))),atualiza_pontuacao(-1),!.
 		 
 %pegar	
 pegar :- posicao(X,Y,_), tile(X,Y,'O'), retract(tile(X,Y,'O')), assert(tile(X,Y,'')), atualiza_pontuacao(-5), atualiza_pontuacao(500),set_real(X,Y),!. 
 pegar :- posicao(X,Y,_), tile(X,Y,'U'), retract(tile(X,Y,'U')), assert(tile(X,Y,'')), atualiza_pontuacao(-5), atualiza_energia(50),set_real(X,Y),!. 
 pegar :- atualiza_pontuacao(-5),!.
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%% Controle automático de ações
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+perigo_marcado(M) :- member(brisa, M).
+perigo_marcado(M) :- member(passos, M).
+perigo_marcado(M) :- member(palmas, M).
+
+seguro(X, Y) :- certeza(X, Y), memory(X, Y, M), \+ perigo_marcado(M).
+seguro(X, Y) :- visitado(X, Y). % visitado já implica ter sido seguro
+
+adjacente_seguro_nao_visitado(X, Y) :-
+    posicao(PX, PY, _),
+    vizinho_de(PX, PY, X, Y),
+    seguro(X, Y),
+    \+ visitado(X, Y).
+
+% Lista todas as casas seguras ainda não visitadas
+fronteiras_seguras(Lista) :-
+    findall((X,Y), (seguro(X,Y), \+ visitado(X,Y)), Lista).
+
+% Verifica se uma casa visitada tem fronteira segura não visitada
+visitado_com_fronteira(X, Y) :-
+    visitado(X, Y),
+    vizinho_de(X, Y, NX, NY),
+    seguro(NX, NY),
+    \+ visitado(NX, NY).
+
+fronteira_segura(Lista) :-
+    findall((X,Y), adjacente_seguro_nao_visitado(X,Y), Lista).
+
+% Distância Manhattan entre dois pontos
+dist_manhattan(X1, Y1, X2, Y2, D) :-
+    DX is abs(X1 - X2),
+    DY is abs(Y1 - Y2),
+    D is DX + DY.
+
+% Menor distância de (X,Y) até qualquer casa em Lista
+distancia_ate_lista(X, Y, Lista, DMin) :-
+    findall(D, (member((LX,LY), Lista), dist_manhattan(X, Y, LX, LY, D)), Ds),
+    Ds \= [],
+    min_list(Ds, DMin).
+
+% Melhor visitado que leva mais perto de uma fronteira segura; se não houver, base
+proximo_destino(X, Y) :-
+    fronteiras_seguras(F), F \= [],
+    findall((D, VX, VY), (visitado(VX, VY), \+ sem_saida(VX, VY), distancia_ate_lista(VX, VY, F, D)), Lista),
+    Lista \= [],
+    sort(Lista, [(_, X, Y)|_]), !.
+proximo_destino(1, 1).
+
+% Passo seguro que reduz a distancia até o destino
+passo_destino(TX, TY, NX, NY, Dir) :-
+    posicao(PX, PY, _),
+    dist_manhattan(PX, PY, TX, TY, D0),
+    vizinho_de(PX, PY, NX, NY),
+    seguro(NX, NY),
+    dist_manhattan(NX, NY, TX, TY, D1),
+    D1 < D0,
+    direcao_para(NX, NY, Dir).
+
+adjacente_visitado(X, Y) :-
+    posicao(PX, PY, _),
+    vizinho_de(PX, PY, X, Y),
+    visitado(X, Y).
+
+distancia_base(X, Y, D) :-
+    DX is abs(X - 1),
+    DY is abs(Y - 1),
+    D is DX + DY.
+
+melhor_retorno_base(X, Y) :-
+    posicao(PX, PY, _),
+    findall((D, NX, NY), (vizinho_de(PX, PY, NX, NY), visitado(NX, NY), distancia_base(NX, NY, D)), Lista),
+    sort(Lista, Ordenada),
+    Ordenada = [(_, X, Y)|_].
+
+melhor_visitado_para_explorar(X, Y) :-
+    posicao(PX, PY, _),
+    findall((NX, NY), (vizinho_de(PX, PY, NX, NY), visitado_com_fronteira(NX, NY)), Fronteiras),
+    Fronteiras \= [],
+    Fronteiras = [(X, Y)|_], !. % prioriza vizinho que leva a fronteira segura
+
+melhor_visitado_para_explorar(X, Y) :-
+    posicao(PX, PY, _),
+    findall((NX, NY), (vizinho_de(PX, PY, NX, NY), visitado(NX, NY)), Lista0),
+    ultima_pos(LX, LY),
+    exclude(=( (LX, LY) ), Lista0, Lista), % tenta evitar voltar imediatamente
+    ( Lista = [(X, Y)|_]
+    ; (Lista = [], Lista0 = [(X,Y)|_]) % se não houver outra opção, volta
+    ).
+
+direcao_para(X, _, leste) :- posicao(PX, _, _), X > PX, !.
+direcao_para(X, _, oeste) :- posicao(PX, _, _), X < PX, !.
+direcao_para(_, Y, norte) :- posicao(_, PY, _), Y > PY, !.
+direcao_para(_, Y, sul) :- posicao(_, PY, _), Y < PY, !.
+
+dir_direita(norte, leste).
+dir_direita(leste, sul).
+dir_direita(sul, oeste).
+dir_direita(oeste, norte).
+
+dir_esquerda(norte, oeste).
+dir_esquerda(oeste, sul).
+dir_esquerda(sul, leste).
+dir_esquerda(leste, norte).
+
+dir_oposta(norte, sul).
+dir_oposta(sul, norte).
+dir_oposta(leste, oeste).
+dir_oposta(oeste, leste).
+
+% próximo passo considerando uma direção desejada
+proximo_passo(Dir, X, Y) :-
+    posicao(PX, PY, _),
+    ( Dir = norte -> X is PX, Y is PY + 1
+    ; Dir = sul   -> X is PX, Y is PY - 1
+    ; Dir = leste -> X is PX + 1, Y is PY
+    ; Dir = oeste -> X is PX - 1, Y is PY).
+
+alinha_ou_anda(Desejada, andar) :-
+    posicao(_, _, Desejada), !.
+alinha_ou_anda(Desejada, virar_direita) :-
+    posicao(_, _, Atual),
+    dir_direita(Atual, Desejada), !.
+alinha_ou_anda(Desejada, virar_esquerda) :-
+    posicao(_, _, Atual),
+    dir_esquerda(Atual, Desejada), !.
+alinha_ou_anda(Desejada, virar_direita) :-
+    posicao(_, _, Atual),
+    dir_oposta(Atual, Desejada), !. % rotaciona quando está oposto
+
+% Log de decisões para depuração
+log_decisao(Motivo, Acao) :-
+    posicao(PX, PY, Dir),
+    format('DECISAO (~w,~w,~w): ~w -> ~w~n', [PX, PY, Dir, Motivo, Acao]).
+
+executa_acao(pegar) :-
+    posicao(X, Y, _),
+    tile(X, Y, 'O'),
+    log_decisao(ouro_na_posicao, pegar), !.
+
+executa_acao(Acao) :-
+    ouros_restantes(0),
+    posicao(1, 1, _),
+    Acao = virar_direita,
+    log_decisao(fim_jogo_base, Acao), !. % apenas gira para indicar que terminou
+
+executa_acao(Acao) :-
+    ouros_restantes(0),
+    melhor_retorno_base(X, Y),
+    direcao_para(X, Y, Dir),
+    alinha_ou_anda(Dir, Acao),
+    log_decisao(retornar_base, Acao), !.
+
+executa_acao(Acao) :-
+    adjacente_seguro_nao_visitado(X, Y),
+    direcao_para(X, Y, Dir),
+    alinha_ou_anda(Dir, Acao),
+    log_decisao(avancar_seguro, Acao), !.
+
+% Planeja um passo em direção ao visitado mais próximo que leva à fronteira segura (ou base se não houver)
+executa_acao(Acao) :-
+    proximo_destino(TX, TY),
+    posicao(PX, PY, _),
+    (PX \= TX ; PY \= TY),
+    passo_destino(TX, TY, _, _, Dir),
+    alinha_ou_anda(Dir, Acao),
+    log_decisao(rumo_destino(TX,TY), Acao), !.
+
+executa_acao(Acao) :-
+    melhor_visitado_para_explorar(X, Y),
+    direcao_para(X, Y, Dir),
+    alinha_ou_anda(Dir, Acao),
+    log_decisao(explorar_visitado(X,Y), Acao), !.
+
+% Quando está sem fronteira segura ao redor, volta em direção à base
+executa_acao(Acao) :-
+    \+ adjacente_seguro_nao_visitado(_, _),
+    fronteiras_seguras([]),
+    direcao_para(1, 1, Dir),
+    alinha_ou_anda(Dir, Acao),
+    fronteira_segura(Front),
+    log_decisao(sem_fronteira_segura(Front), Acao), !.
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %% Funcoes Auxiliares de navegação e observação
@@ -278,14 +498,39 @@ gravar_sensacao_atual :-
     retractall(local_sensacao(X, Y, _)),
     assert(local_sensacao(X, Y, ListaSensores)).
 
+% remove sensores já explicados por perigos certos adjacentes
+filtra_sensores([], []).
+filtra_sensores([S|T], R) :-
+    posicao(PX, PY, _),
+    ( sensacao_explicada(S, PX, PY) ->
+        limpa_sensor_explicado(PX, PY, S),
+        filtra_sensores(T, R)
+    ;   filtra_sensores(T, RT), R = [S|RT]
+    ).
+
+% remove um sensor das memórias dos vizinhos quando já há uma certeza explicando
+limpa_sensor_explicado(SX, SY, Sensor) :-
+    vizinho_de(SX, SY, NX, NY),
+    \+ certeza(NX, NY),
+    \+ visitado(NX, NY),
+    memory(NX, NY, Mem),
+    member(Sensor, Mem),
+    delete_elem(Mem, Sensor, Nova),
+    retract(memory(NX, NY, Mem)),
+    assert(memory(NX, NY, Nova)),
+    fail.
+limpa_sensor_explicado(_, _, _).
+
 %consulta e processa observações
 atualiza_obs:-
 		gravar_sensacao_atual,
 		adj_cand_obs(LP), 
-		observacoes(LO), 
+		observacoes(LO0),
+		filtra_sensores(LO0, LO),
 		iter_pos_list(LP,LO), 
 		observacao_certeza,
 		triangulacao,
+		deduz_sensacao_unica,
 		observacao_vazia, 
 		reportar_status.
 
@@ -302,8 +547,31 @@ iter_pos_list([H|T], LO) :- H=(X,Y),
 							adiciona_observacoes(X, Y, LO)),
 							iter_pos_list(T, LO).							 
 
+% Se uma sensacao registrada em alguma sala tem exatamente um vizinho incerto,
+% marcamos essa casa como certeza. Não reutiliza memória anterior para evitar falsos positivos.
+deduz_sensacao_unica :-
+    local_sensacao(SX, SY, Sensacoes),
+    member(Sensor, [brisa,palmas,passos]),
+    member(Sensor, Sensacoes),
+    \+ sensacao_explicada(Sensor, SX, SY),
+    findall((NX, NY), (
+        vizinho_de(SX, SY, NX, NY),
+        \+ visitado(NX, NY),
+        \+ certeza(NX, NY)
+    ), Cands),
+    length(Cands, 1),
+    Cands = [(TX, TY)],
+    retractall(memory(TX, TY, _)),
+    assert(memory(TX, TY, [Sensor])),
+    assert(certeza(TX, TY)),
+    write('DEDUTOR: Certeza '), write(Sensor), write(' em '), write(TX), write(','), writeln(TY),
+    fail.
+deduz_sensacao_unica :- true.
+
 %Corrige observacoes antigas na memoria que ficaram com apenas uma adjacencia
 corrige_observacoes_antigas(X, Y, []):- \+certeza(X,Y), memory(X,Y,[]).
+corrige_observacoes_antigas(X, Y, LO):- \+certeza(X,Y), memory(X,Y,[]), LO \= [], 
+	retract(memory(X,Y,[])), assert(memory(X,Y,LO)).
 corrige_observacoes_antigas(X, Y, LO):-
 	\+certeza(X,Y), \+ memory(X,Y,[]), memory(X, Y, LM), intersection(LO, LM, L), 
 	retract(memory(X, Y, LM)), assert(memory(X, Y, L)).
