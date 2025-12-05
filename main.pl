@@ -20,6 +20,11 @@ delete([Elem|Tail], Del, Result) :-
     ;   Result = [Elem|Rest],
         delete(Tail, Del, Rest)
     ).
+
+% remove primeira ocorrência de um elemento (usada em limpeza de sensores)
+delete_elem(Elem, [Elem|T], T) :- !.
+delete_elem(Elem, [H|T], [H|R]) :- delete_elem(Elem, T, R).
+delete_elem(_, [], []).
 	
 
 
@@ -341,6 +346,68 @@ passo_destino(TX, TY, NX, NY, Dir) :-
     D1 < D0,
     direcao_para(NX, NY, Dir).
 
+% BFS em áreas seguras para achar o próximo passo até o destino
+caminho_seguro(TX, TY, Dir) :-
+    posicao(PX, PY, _),
+    bfs_seguro([(PX, PY, [])], [], (TX, TY), Caminho),
+    Caminho = [(NX, NY)|_],
+    direcao_para(NX, NY, Dir).
+
+bfs_seguro([], _, _, _) :- fail.
+bfs_seguro([(X, Y, Path)|_], _, (X, Y), Path) :- !.
+bfs_seguro([(X, Y, Path)|Rest], Visitados, Dest, Resultado) :-
+    findall((NX, NY, NovoPath), (
+        vizinho_de(X, Y, NX, NY),
+        seguro(NX, NY),
+        \+ member((NX, NY), Visitados),
+        \+ member((NX, NY), Path),
+        append(Path, [(NX, NY)], NovoPath)
+    ), Sucessores),
+    append(Rest, Sucessores, Fila),
+    bfs_seguro(Fila, [(X, Y)|Visitados], Dest, Resultado).
+
+% BFS para qualquer fronteira segura disponível (evita alvos inalcançáveis)
+caminho_seguro_fronteira(TX, TY, Dir) :-
+    fronteiras_seguras(F), F \= [],
+    posicao(PX, PY, _),
+    bfs_seguro_multi([(PX, PY, [])], [], F, (TX, TY), Caminho),
+    Caminho = [(NX, NY)|_],
+    direcao_para(NX, NY, Dir).
+
+bfs_seguro_multi([], _, _, _, _) :- fail.
+bfs_seguro_multi([(X, Y, Path)|_], _, Goals, (X, Y), Path) :-
+    member((X, Y), Goals), !.
+bfs_seguro_multi([(X, Y, Path)|Rest], Visitados, Goals, Dest, Resultado) :-
+    findall((NX, NY, NovoPath), (
+        vizinho_de(X, Y, NX, NY),
+        seguro(NX, NY),
+        \+ member((NX, NY), Visitados),
+        \+ member((NX, NY), Path),
+        append(Path, [(NX, NY)], NovoPath)
+    ), Sucessores),
+    append(Rest, Sucessores, Fila),
+    bfs_seguro_multi(Fila, [(X, Y)|Visitados], Goals, Dest, Resultado).
+
+% BFS em casas visitadas para voltar à base
+caminho_base_seguro(Dir) :-
+    posicao(PX, PY, _),
+    bfs_visitado([(PX, PY, [])], [], (1, 1), Caminho),
+    Caminho = [(NX, NY)|_],
+    direcao_para(NX, NY, Dir).
+
+bfs_visitado([], _, _, _) :- fail.
+bfs_visitado([(X, Y, Path)|_], _, (X, Y), Path) :- !.
+bfs_visitado([(X, Y, Path)|Rest], Visitados, Dest, Resultado) :-
+    findall((NX, NY, NovoPath), (
+        vizinho_de(X, Y, NX, NY),
+        visitado(NX, NY),
+        \+ member((NX, NY), Visitados),
+        \+ member((NX, NY), Path),
+        append(Path, [(NX, NY)], NovoPath)
+    ), Sucessores),
+    append(Rest, Sucessores, Fila),
+    bfs_visitado(Fila, [(X, Y)|Visitados], Dest, Resultado).
+
 adjacente_visitado(X, Y) :-
     posicao(PX, PY, _),
     vizinho_de(PX, PY, X, Y),
@@ -430,6 +497,13 @@ executa_acao(Acao) :-
 
 executa_acao(Acao) :-
     ouros_restantes(0),
+    caminho_base_seguro(Dir),
+    alinha_ou_anda(Dir, Acao),
+    log_decisao(retornar_base, Acao), !.
+
+% Fallback antigo para voltar caso BFS falhe
+executa_acao(Acao) :-
+    ouros_restantes(0),
     melhor_retorno_base(X, Y),
     direcao_para(X, Y, Dir),
     alinha_ou_anda(Dir, Acao),
@@ -441,14 +515,11 @@ executa_acao(Acao) :-
     alinha_ou_anda(Dir, Acao),
     log_decisao(avancar_seguro, Acao), !.
 
-% Planeja um passo em direção ao visitado mais próximo que leva à fronteira segura (ou base se não houver)
+% Passo seguro em direção a uma fronteira segura alcançável via BFS
 executa_acao(Acao) :-
-    proximo_destino(TX, TY),
-    posicao(PX, PY, _),
-    (PX \= TX ; PY \= TY),
-    passo_destino(TX, TY, _, _, Dir),
+    caminho_seguro_fronteira(TX, TY, Dir),
     alinha_ou_anda(Dir, Acao),
-    log_decisao(rumo_destino(TX,TY), Acao), !.
+    log_decisao(rumo_fronteira(TX,TY), Acao), !.
 
 executa_acao(Acao) :-
     melhor_visitado_para_explorar(X, Y),
