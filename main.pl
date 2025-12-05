@@ -95,6 +95,7 @@ sensacao_explicada(Sensor, SX, SY) :-
 % Regra Genérica: Tenta triangular perigos (busca pares de casas que sentiram o mesmo sensor)
 triangulacao :-
     (tenta_triangular(passos); true),
+    (tenta_triangular(passos_pequeno); true),
     (tenta_triangular(palmas); true),
     (tenta_triangular(brisa); true), !.
 
@@ -138,7 +139,8 @@ ouros_restantes(N) :-
 inimigos_encontrados(N) :-
     findall((X,Y), (
         (visitado(X,Y), (tile(X,Y,'D'); tile(X,Y,'d')));
-        (certeza(X,Y), memory(X,Y,M), member(passos, M), \+ visitado(X,Y))
+        (certeza(X,Y), memory(X,Y,M), member(passos, M), \+ visitado(X,Y));
+        (certeza(X,Y), memory(X,Y,M), member(passos_pequeno, M), \+ visitado(X,Y))
     ), Lista),
     sort(Lista, Unicos), length(Unicos, N).
 
@@ -167,7 +169,8 @@ apagar_suspeitas(_) :- true.
 
 %Limpeza Global: Se achou todos de um tipo, apaga as suspeitas restantes
 limpeza_global :-
-    total_inimigos(TI), inimigos_encontrados(IE), IE >= TI, apagar_suspeitas(passos);
+    total_inimigos(TI), inimigos_encontrados(IE), IE >= TI, apagar_suspeitas(passos); 
+    total_inimigos(TI), inimigos_encontrados(IE), IE >= TI, apagar_suspeitas(passos_pequeno); 
     total_pocos(TP), pocos_encontrados(PE), PE >= TP, apagar_suspeitas(brisa);
     total_teleportes(TT), teleportes_encontrados(TE), TE >= TT, apagar_suspeitas(palmas);
     true.
@@ -175,10 +178,13 @@ limpeza_global :-
 reportar_status :-
     total_inimigos(TI), inimigos_encontrados(IE), RestoI is TI - IE,
     total_pocos(TP), pocos_encontrados(PE), RestoP is TP - PE,
+    total_teleportes(TT), teleportes_encontrados(TE), RestoT is TT - TE,
+
 
     nl, write('--- STATUS DO CONHECIMENTO ---'), nl,
     write('Inimigos Restantes: '), write(RestoI), write('/'), write(TI), nl,
-	write('Pocos Restantes: '), write(RestoP), write('/'), write(TP), nl.
+	write('Pocos Restantes: '), write(RestoP), write('/'), write(TP), nl,
+    write('Teleportes Restantes: '), write(RestoT), write('/'), write(TT), nl.
 
 
 
@@ -281,7 +287,7 @@ andar :- posicao(X,Y,P), P = oeste,  X > 1, XX is X - 1,
 		 ((retract(visitado(X,Y)), assert(visitado(X,Y))); assert(visitado(X,Y))),atualiza_pontuacao(-1),!.
 		 
 %pegar	
-pegar :- posicao(X,Y,_), tile(X,Y,'O'), retract(tile(X,Y,'O')), assert(tile(X,Y,'')), atualiza_pontuacao(-5), atualiza_pontuacao(500),set_real(X,Y),!. 
+pegar :- posicao(X,Y,_), tile(X,Y,'O'), retract(tile(X,Y,'O')), assert(tile(X,Y,'')), atualiza_pontuacao(-5), atualiza_pontuacao(1000),set_real(X,Y),!. 
 pegar :- posicao(X,Y,_), tile(X,Y,'U'), retract(tile(X,Y,'U')), assert(tile(X,Y,'')), atualiza_pontuacao(-5), atualiza_energia(50),set_real(X,Y),!. 
 pegar :- atualiza_pontuacao(-5),!.
 
@@ -291,6 +297,7 @@ pegar :- atualiza_pontuacao(-5),!.
 
 perigo_marcado(M) :- member(brisa, M).
 perigo_marcado(M) :- member(passos, M).
+perigo_marcado(M) :- member(passos_pequeno, M).
 perigo_marcado(M) :- member(palmas, M).
 
 seguro(X, Y) :- certeza(X, Y), memory(X, Y, M), \+ perigo_marcado(M).
@@ -557,7 +564,7 @@ observacao_loc(reflexo,L) :- member('U',L).
 observacao_adj(brisa,L) :- member('P',L).
 observacao_adj(palmas,L) :- member('T',L).
 observacao_adj(passos,L) :- member('D',L).
-observacao_adj(passos,L) :- member('d',L).
+observacao_adj(passos_pequeno,L) :- member('d',L).
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %% Tratamento de KB e observações
@@ -622,7 +629,7 @@ iter_pos_list([H|T], LO) :- H=(X,Y),
 % marcamos essa casa como certeza. Não reutiliza memória anterior para evitar falsos positivos.
 deduz_sensacao_unica :-
     local_sensacao(SX, SY, Sensacoes),
-    member(Sensor, [brisa,palmas,passos]),
+    member(Sensor, [brisa,palmas,passos, passos_pequeno]),
     member(Sensor, Sensacoes),
     \+ sensacao_explicada(Sensor, SX, SY),
     findall((NX, NY), (
@@ -659,7 +666,8 @@ adiciona_observacoes(X, Y, LO) :- \+certeza(X,Y), \+ memory(X,Y,_), assert(memor
 						
 observacao_certeza:- observacao_certeza('brisa'),
 						observacao_certeza('palmas'),
-						observacao_certeza('passos').
+						observacao_certeza('passos'),
+                        observacao_certeza('passos_pequeno').
 						
 observacao_certeza(Z):- findall((X,Y), (adjacente(X, Y), 
 						((\+visitado(X,Y), \+certeza(X,Y));(certeza(X,Y),memory(X,Y,[Z]))),
@@ -675,7 +683,8 @@ set_real(X,Y):- ((retract(certeza(X,Y)), assert(certeza(X,Y)),!); assert(certeza
 set_real2(X,Y):- tile(X,Y,'P'), ((retract(memory(X,Y,_)),assert(memory(X,Y,[brisa])),!);assert(memory(X,Y,[brisa]))),!.
 set_real2(X,Y):- tile(X,Y,'O'), ((retract(memory(X,Y,_)),assert(memory(X,Y,[brilho])),!);assert(memory(X,Y,[brilho]))),!.
 set_real2(X,Y):- tile(X,Y,'T'), ((retract(memory(X,Y,_)),assert(memory(X,Y,[palmas])),!);assert(memory(X,Y,[palmas]))),!.
-set_real2(X,Y):- ((tile(X,Y,'D'),!); tile(X,Y,'d')), ((retract(memory(X,Y,_)),assert(memory(X,Y,[passos])),!);assert(memory(X,Y,[passos]))),!.
+set_real2(X,Y):- tile(X,Y,'D'), ((retract(memory(X,Y,_)),assert(memory(X,Y,[passos])),!);assert(memory(X,Y,[passos]))),!.
+set_real2(X,Y):- tile(X,Y,'d'), ((retract(memory(X,Y,_)),assert(memory(X,Y,[passos_pequeno])),!);assert(memory(X,Y,[passos_pequeno]))),!.
 set_real2(X,Y):- tile(X,Y,'U'), ((retract(memory(X,Y,_)),assert(memory(X,Y,[reflexo])),!);assert(memory(X,Y,[reflexo]))),!.
 set_real2(X,Y):- tile(X,Y,''), ((retract(memory(X,Y,_)),assert(memory(X,Y,[])),!);assert(memory(X,Y,[]))),!.
 
@@ -707,6 +716,7 @@ show_mem_info(X,Y) :- memory(X,Y,Z),
 		((member(palmas, Z), write('T'));write(' ')),
 		((member(brilho, Z), write('O'));write(' ')),
 		((member(passos, Z), write('D'));write(' ')),
+        ((member(passos_pequeno, Z), write('d'));write(' ')),
 		((member(reflexo, Z), write('U'));write(' ')),!.
 
 show_mem_info(X,Y) :- \+memory(X,Y,[]), 
@@ -719,6 +729,7 @@ show_mem_position(X,Y) :- posicao(X,Y,_),
 		((memory(X,Y,Z),
 		((member(brilho, Z), write('O'));write(' ')),
 		((member(passos, Z), write('D'));write(' ')),
+        ((member(passos_pequeno, Z), write('d'));write(' ')),
 		((member(reflexo, Z), write('U'));write(' ')),!);
 		(write('   '),!)).
 	

@@ -119,6 +119,8 @@ def update_prolog():
                     mapa[y.get_value()-1][x.get_value()-1] += 'T'
                 elif str(s) == 'passos':
                     mapa[y.get_value()-1][x.get_value()-1] += 'D'
+                elif str(s) == 'passos_pequeno':
+                    mapa[y.get_value()-1][x.get_value()-1] += 'd'
                 elif str(s) == 'reflexo':
                     mapa[y.get_value()-1][x.get_value()-1] += 'U'
                 elif str(s) == 'brilho':
