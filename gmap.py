@@ -8,7 +8,7 @@ current_path = str(pathlib.Path().resolve())
 
 elapsed_time = 0
 auto_play_tempo = 0.5
-auto_play = False # desligar para controlar manualmente
+auto_play = True  # desligar para controlar manualmente
 show_map = False
 
 scale = 60
@@ -19,6 +19,7 @@ height = size_y * scale #Altura Janela
 
 player_pos = (1,1,'norte')
 energia = 0
+ouros = 0
 pontuacao = 0
 
 
@@ -118,6 +119,8 @@ def update_prolog():
                     mapa[y.get_value()-1][x.get_value()-1] += 'T'
                 elif str(s) == 'passos':
                     mapa[y.get_value()-1][x.get_value()-1] += 'D'
+                elif str(s) == 'passos_pequeno':
+                    mapa[y.get_value()-1][x.get_value()-1] += 'd'
                 elif str(s) == 'reflexo':
                     mapa[y.get_value()-1][x.get_value()-1] += 'U'
                 elif str(s) == 'brilho':
@@ -149,6 +152,13 @@ def update_prolog():
     pontuacao = x.value
     pontuacao_query.closeQuery()
 
+    global ouros
+    x = Variable()
+    q = Query(Functor("ouros_restantes", 1)(x))
+    if q.nextSolution():
+        ouros = x.value
+    q.closeQuery()
+
     #print(mapa)
     #print(player_pos)
 
@@ -162,93 +172,93 @@ def load():
     sys_font = pygame.font.Font(pygame.font.get_default_font(), 20)
     clock = pygame.time.Clock() 
 
-    img_wall = pygame.image.load('wall.jpg')
+    img_wall = pygame.image.load('img/wall.jpg')
     #img_wall2_size = (img_wall.get_width()/map_width, img_wall.get_height()/map_height)
     img_wall_size = (width/size_x, height/size_y)
     
     img_wall = pygame.transform.scale(img_wall, img_wall_size)
 
     
-    img_player_up = pygame.image.load('player_up.png')
+    img_player_up = pygame.image.load('img/player_up.png')
     img_player_up_size = (width/size_x, height/size_y)
     img_player_up = pygame.transform.scale(img_player_up, img_player_up_size)
 
-    img_player_down = pygame.image.load('player_down.png')
+    img_player_down = pygame.image.load('img/player_down.png')
     img_player_down_size = (width/size_x, height/size_y)
     img_player_down = pygame.transform.scale(img_player_down, img_player_down_size)
 
-    img_player_left = pygame.image.load('player_left.png')
+    img_player_left = pygame.image.load('img/player_left.png')
     img_player_left_size = (width/size_x, height/size_y)
     img_player_left = pygame.transform.scale(img_player_left, img_player_left_size)
 
-    img_player_right = pygame.image.load('player_right.png')
+    img_player_right = pygame.image.load('img/player_right.png')
     img_player_right_size = (width/size_x, height/size_y)
     img_player_right = pygame.transform.scale(img_player_right, img_player_right_size)
 
 
-    img_tomb = pygame.image.load('tombstone.png')
+    img_tomb = pygame.image.load('img/tombstone.png')
     img_tomb_size = (width/size_x, height/size_y)
     img_tomb = pygame.transform.scale(img_tomb, img_tomb_size)
 
 
 
-    img_grass = pygame.image.load('grass.jpg')
+    img_grass = pygame.image.load('img/grass.jpg')
     img_grass_size = (width/size_x, height/size_y)
     img_grass = pygame.transform.scale(img_grass, img_grass_size)
 
-    img_floor = pygame.image.load('floor.png')
+    img_floor = pygame.image.load('img/floor.png')
     img_floor_size = (width/size_x, height/size_y)
     img_floor = pygame.transform.scale(img_floor, img_floor_size)
 
-    img_gold = pygame.image.load('gold.png')
+    img_gold = pygame.image.load('img/gold.png')
     img_gold_size = (width/size_x, height/size_y)
     img_gold = pygame.transform.scale(img_gold, img_gold_size)
 
-    img_pit = pygame.image.load('pit.png')
+    img_pit = pygame.image.load('img/pit.png')
     img_pit_size = (width/size_x, height/size_y)
     img_pit = pygame.transform.scale(img_pit, img_pit_size)
 
-    img_enemy1 = pygame.image.load('enemy1.png')
+    img_enemy1 = pygame.image.load('img/enemy1.png')
     img_enemy1_size = (width/size_x, height/size_y)
     img_enemy1 = pygame.transform.scale(img_enemy1, img_enemy1_size)
 
-    img_enemy2 = pygame.image.load('enemy2.png')
+    img_enemy2 = pygame.image.load('img/enemy2.png')
     img_enemy2_size = (width/size_x, height/size_y)
     img_enemy2 = pygame.transform.scale(img_enemy2, img_enemy2_size)
 
-    img_bat = pygame.image.load('bat.png')
+    img_bat = pygame.image.load('img/bat.png')
     img_bat_size = (width/size_x, height/size_y)
     img_bat = pygame.transform.scale(img_bat, img_bat_size)
 
-    img_health = pygame.image.load('health.png')
+    img_health = pygame.image.load('img/health.png')
     img_health_size = (width/size_x, height/size_y)
     img_health = pygame.transform.scale(img_health, img_health_size)    
     
-    bw_img_floor = pygame.image.load('bw_floor.png')
+    bw_img_floor = pygame.image.load('img/bw_floor.png')
     bw_img_floor_size = (width/size_x, height/size_y)
     bw_img_floor = pygame.transform.scale(bw_img_floor, bw_img_floor_size)
 
-    bw_img_gold = pygame.image.load('bw_gold.png')
+    bw_img_gold = pygame.image.load('img/bw_gold.png')
     bw_img_gold_size = (width/size_x, height/size_y)
     bw_img_gold = pygame.transform.scale(bw_img_gold, bw_img_gold_size)
 
-    bw_img_pit = pygame.image.load('bw_pit.png')
+    bw_img_pit = pygame.image.load('img/bw_pit.png')
     bw_img_pit_size = (width/size_x, height/size_y)
     bw_img_pit = pygame.transform.scale(bw_img_pit, bw_img_pit_size)
 
-    bw_img_enemy1 = pygame.image.load('bw_enemy1.png')
+    bw_img_enemy1 = pygame.image.load('img/bw_enemy1.png')
     bw_img_enemy1_size = (width/size_x, height/size_y)
     bw_img_enemy1 = pygame.transform.scale(bw_img_enemy1, bw_img_enemy1_size)
 
-    bw_img_enemy2 = pygame.image.load('bw_enemy2.png')
+    bw_img_enemy2 = pygame.image.load('img/bw_enemy2.png')
     bw_img_enemy2_size = (width/size_x, height/size_y)
     bw_img_enemy2 = pygame.transform.scale(bw_img_enemy2, bw_img_enemy2_size)
 
-    bw_img_bat = pygame.image.load('bw_bat.png')
+    bw_img_bat = pygame.image.load('img/bw_bat.png')
     bw_img_bat_size = (width/size_x, height/size_y)
     bw_img_bat = pygame.transform.scale(bw_img_bat, bw_img_bat_size)
 
-    bw_img_health = pygame.image.load('bw_health.png')
+    bw_img_health = pygame.image.load('img/bw_health.png')
     bw_img_health_size = (width/size_x, height/size_y)
     bw_img_health = pygame.transform.scale(bw_img_health, bw_img_health_size)  
 
@@ -364,10 +374,19 @@ def draw_screen(screen):
     screen.blit(t, t.get_rect(top = height + 5, left=40))
 
     t = sys_font.render(last_action, False, (255,255,255))
-    screen.blit(t, t.get_rect(top = height + 5, left=width/2-40))
+    screen.blit(t, t.get_rect(top = height + 5, left=width/2 - 140))
+
+    t = sys_font.render("Ouros Restantes: " + str(ouros), False, (255,255,255)) 
+    screen.blit(t, t.get_rect(top = height + 5, left=width/2 + 25))
     
     t = sys_font.render("Energia: " + str(energia), False, (255,255,255))
     screen.blit(t, t.get_rect(top = height + 5, left=width-140))
+    
+    # Mostra mensagem de vitória na tela
+    if player_pos[0] == 1 and player_pos[1] == 1 and ouros == 0:
+        t = sys_font.render("VITORIA!", False, (0, 255, 0))
+        screen.blit(t, t.get_rect(center=(width/2, height/2)))
+    
 
 def main_loop(screen):  
     global clock
@@ -405,6 +424,5 @@ load()
 
 main_loop(screen)
 pygame.quit()
-
 
 
